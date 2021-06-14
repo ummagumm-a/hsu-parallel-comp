@@ -1,0 +1,80 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.34.4.
+--
+-- see: https://github.com/sol/hpack
+
+name:           parallelCompilers
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/ummagumm-a/parallelCompilers#readme>
+homepage:       https://github.com/ummagumm-a/parallelCompilers#readme
+bug-reports:    https://github.com/ummagumm-a/parallelCompilers/issues
+author:         ummagumma
+maintainer:     siniy.vyacheslav@gmail.com
+copyright:      2021 ummagumma
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/ummagumm-a/parallelCompilers
+
+library
+  exposed-modules:
+      Lib
+      Ops
+      Utils
+  other-modules:
+      Paths_parallelCompilers
+  hs-source-dirs:
+      src
+  default-extensions:
+      TypeOperators
+      RebindableSyntax
+  build-depends:
+      accelerate
+    , accelerate-llvm
+    , accelerate-llvm-native
+    , base >=4.7 && <5
+    , lens
+    , lens-accelerate
+  default-language: Haskell2010
+
+executable parallelCompilers-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_parallelCompilers
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      accelerate
+    , accelerate-llvm
+    , accelerate-llvm-native
+    , base >=4.7 && <5
+    , lens
+    , lens-accelerate
+    , parallelCompilers
+  default-language: Haskell2010
+
+test-suite parallelCompilers-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_parallelCompilers
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      accelerate
+    , accelerate-llvm
+    , accelerate-llvm-native
+    , base >=4.7 && <5
+    , lens
+    , lens-accelerate
+    , parallelCompilers
+  default-language: Haskell2010
