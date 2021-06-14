@@ -14,5 +14,5 @@ valuesVec = A.use $ fromList (Z:.9) "f000w+w07"
 The output is the matrix at the end of Section 3.2 of Hsu's article.
 
 stack build
-stack build
+
 stack exec parallelCompilers-exe
