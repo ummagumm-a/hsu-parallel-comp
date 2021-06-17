@@ -6,65 +6,38 @@ import Data.Array.Accelerate.Control.Lens as Lens
 import Data.List
 import Utils
 
-    {-
-outerProduct :: Acc (Array sh a) -> (Exp a -> Exp b -> Exp c) -> Acc (Array sh' b) -> Acc (Array sh'' c)
-outerProduct arr1 g arr2 = A.map (\x -> (helper g x arr2)) arr1
---  where
---    helper x = A.map (g x) arr2
--}
-
+-- | Produces an outer vector product of two vectors
+-- with some function. 
+--
+-- >>> let vec = fromList (Z :. 3) [0..] :: Vector Int
+-- >>> vec
+-- Vector (Z :. 3) [0,1,2]
+--
+-- >>> CPU.run $ outerVecProduct vec (A.*) vec
+-- Matrix (Z :. 3 :. 3)
+--   [ 0, 0, 0,
+--     0, 1, 2,
+--     0, 2, 4]
 outerVecProduct 
     :: (Elt a, Elt b, Elt c) 
     => Acc (Vector a) 
     -> (Exp a -> Exp b -> Exp c) 
     -> Acc (Vector b) 
     -> Acc (Matrix c)
-outerVecProduct vec1 g vec2 = A.reshape (A.lift $ Z :. nEls1 :. nEls2) (A.zipWith g extVec1 extVec2)
+outerVecProduct vec1 g vec2 
+  = A.reshape newShape (A.zipWith g extVec1 extVec2)
   where
-    nEls1 = nEls vec1
-    nEls2 = nEls vec2
+    nEls1 = A.size vec1
+    nEls2 = A.size vec2
+
+    newShape = A.lift $ Z :. nEls1 :. nEls2
 
     extVec1 = extVecAlong nEls2 vec1 
-    extVec2 = extVecAcross nEls1 vec2 
-
-findFirstOcc 
-  :: (Shape sh, Elt a, A.Eq a)
-  => Acc (Array sh a)
-  -> Exp a
-  -> Maybe Int
-findFirstOcc arr el
-  = findIndex cond (toList (CPU.run arr))
-  where
-    cond = expToSimple . (A.== el) . A.constant
-
--- | Check whether vec1 is a prefix of vec2.
--- Prints error if vec1 and vec2 have different lengths.
---
--- >>> let vec = A.use (fromList (Z :. 5) [0..] :: Vector Int)
--- >>> let vec1 = A.use (fromList (Z :. 5) [0, 1, 2, 0, 0] :: Vector Int)
--- >>> CPU.run $ A.unit $ isPrefixOf' vec vec1
--- Scalar Z [True]
---
--- >>> CPU.run $ A.unit $ isPrefixOf' vec1 vec
--- Scalar Z [False]
-isPrefixOf'
-  :: Acc (Vector Int)
-  -> Acc (Vector Int)
-  -> Exp Bool
-isPrefixOf' vec1 vec2
-  | expToSimple cond = ans
-  | otherwise = undefined
-  where
-    cond = A.length vec1 A.== A.length vec2
-    ans = A.and (dFork vec2 equal or' zeroRightArg vec1) A.!! 0
-    mismatchErr = error "LENGTH ERROR: Mismatched left and right argument shapes"
-
-    equal = A.zipWith (A.==)
-    or' = A.zipWith (A.||)
-    zeroRightArg = \_ b -> A.map (A.== 0) b
+    extVec2 = extVecAcross nEls1 vec2
 
 -- | Given a boolean vector vec, 
--- the function selects rows from mat based on the true elements of vec.
+-- the function selects rows from mat 
+-- based on the corresponding true elements of vec.
 --
 -- >>> let vec = A.use (fromList (Z :. 3) [True, False, True] :: Vector Bool)
 -- >>> let mat = A.use (fromList (Z :. 3 :. 4) [0..] :: Matrix Int)
@@ -83,11 +56,13 @@ selectRows
   -> Acc (Matrix a)
   -> Acc (Matrix a)
 selectRows vec mat 
-  = A.reshape (A.lift $ Z :. nRows :. cols) filtered
+  = A.reshape shape' filtered
   where
-    Z :. _ :. cols = unlift (A.shape mat) :: Z :. Exp Int :. Exp Int
+    (_,cols) = matSh mat
+    shape' = A.lift $ Z :. nRows :. cols
+
     sieve = A.replicate (lift (Z :. All :. cols)) vec
-    filtered = compact sieve mat ^. _1
+    filtered = A.afst $ compact sieve mat
     nRows = A.length filtered `A.div` cols 
 
 -- | Calculate the inner product of two matrices. 
@@ -122,17 +97,12 @@ innerProduct mat1 f g mat2
   where
     cond = cols1 A.== rows2
 
-    Z :. rows1 :. cols1 = A.unlift (A.shape mat1) :: Z :. Exp Int :. Exp Int
-    Z :. rows2 :. cols2 = A.unlift (A.shape mat2) :: Z :. Exp Int :. Exp Int
+    (rows1, cols1) = matSh mat1
+    (rows2, cols2) = matSh mat2
 
     extMat1 = A.replicate (A.lift (Z :. All :. cols2 :. All)) mat1 
     extMat2 = A.replicate (A.lift (Z :. rows1 :. All :. All)) (A.transpose mat2)
 
--- arr (9x5) . arr (5x2)
--- extend the first to 9x5x2 
--- extend the second to 9x5x2
--- take the penultimate axis
- 
 -- | A monadic two-train tacit function.
 atop 
   :: (Shape sh, Shape sh', Shape sh'',
@@ -243,4 +213,3 @@ elRowOp vec g mat
           vecEl = (A.!!) vec (A.lift k)
           row = slice mat (A.constant (Z :. (k :: Int) :. All))
 -}
-

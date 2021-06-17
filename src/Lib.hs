@@ -1,11 +1,7 @@
-module Lib
-    ( someFunc
-    ) where
+module Lib where
 
 import Data.Array.Accelerate as A
 import Data.Array.Accelerate.LLVM.Native as CPU
-import Data.Array.Accelerate.Control.Lens as Lens
-import qualified Prelude as P
 import Data.Char
 import Utils
 import Ops
@@ -23,6 +19,27 @@ nodeVec = A.use $ fromList (Z:.9) "FEFEVPVAN"
 valuesVec :: Acc (Vector Char)
 valuesVec = A.use $ fromList (Z:.9) "f000w+w07" 
 
+-- | Composes vector of depths, vector of node names
+-- and vector of values at nodes into a single matrix.
+--
+-- >>> CPU.run depthVec
+-- Vector (Z :. 9) [0,1,2,3,4,4,4,2,3]
+-- >>> CPU.run nodeVec
+-- Vector (Z :. 9) ['F','E','F','E','V','P','V','A','N']
+-- >>> CPU.run valuesVec
+-- Vector (Z :. 9) ['f','0','0','0','w','+','w','0','7']
+--
+-- CPU.run $ fASTMatrix depthVec nodeVec valuesVec
+-- Matrix (Z :. 9 :. 3) 
+--   [ '0', 'F', 'f',
+--     '1', 'E', '0',
+--     '2', 'F', '0',
+--     '3', 'E', '0',
+--     '4', 'V', 'w',
+--     '4', 'P', '+',
+--     '4', 'V', 'w',
+--     '2', 'A', '0',
+--     '3', 'N', '7']
 fASTMatrix 
   :: Acc (Vector Int)
   -> Acc (Vector Char)
@@ -35,63 +52,112 @@ fASTMatrix depths nodes values
   where
     depths' = A.map (A.chr . (+ 48)) depths
 
+-- | Produces depth matrix for a depth vector.
+-- Each row corresponds to each element (el) in vector.
+-- Non-zero element is located at the column of number el.
+--
+-- >>> CPU.run depthVec
+-- Vector (Z :. 9) [0,1,2,3,4,4,4,2,3]
+--
+-- >>> CPU.run $ depthMat depthVec
+-- Matrix (Z :. 9 :. 5) 
+--   [ 1, 0, 0, 0, 0,
+--     0, 1, 0, 0, 0,
+--     0, 0, 1, 0, 0,
+--     0, 0, 0, 1, 0,
+--     0, 0, 0, 0, 1,
+--     0, 0, 0, 0, 1,
+--     0, 0, 0, 0, 1,
+--     0, 0, 1, 0, 0,
+--     0, 0, 0, 1, 0]
 depthMat 
   :: Acc (Vector Int)
   -> Acc (Matrix Int)
-depthMat vec = A.map A.boolToInt $ outerVecProduct vec (A.==) depths
+depthMat vec 
+  = outerVecProduct vec g depths
   where
-    depths = A.use (fromList (Z:.depth) [0..] :: Vector Int)
+    depths = A.enumFromN (A.lift $ Z :. depth) 0
+
+    g = \x y -> A.boolToInt $ x A.== y
 
     depth = 1 + findMax vec
 
+-- | Produces an interesting result of applying 
+-- a sum scan along the first axis to the depth matrix.
 interestingMat 
   :: Acc (Matrix Int)
   -> Acc (Matrix Int)
-interestingMat mat = A.transpose $ A.scanl1 (+) (A.transpose mat)
+interestingMat = A.transpose . A.scanl1 (+) . A.transpose
 
-takeNForNC 
+-- | Takes n_i elements from each i-th row of a matrix.
+-- >>> let vec = fromList (Z :. 3) [0..] :: Vector Int
+-- >>> *Lib> vec
+-- Vector (Z :. 3) [0,1,2]
+--
+-- >>> let mat = fromList (Z :. 3 :. 4) [0..] :: Matrix Int
+-- >>> mat
+-- Matrix (Z :. 3 :. 4) 
+--   [ 0, 1,  2,  3,
+--     4, 5,  6,  7,
+--     8, 9, 10, 11]
+--
+-- >>> CPU.run $ takeNFromRows (A.use vec) (A.use mat)
+-- Matrix (Z :. 3 :. 4) 
+--   [ 0, 0,  0, 0,
+--     4, 5,  0, 0,
+--     8, 9, 10, 0]
+takeNFromRows
   :: Acc (Vector Int)
   -> Acc (Matrix Int)
   -> Acc (Matrix Int)
-takeNForNC vec mat
-  = helper 0
+takeNFromRows vec = A.imap f
   where
-    maxDep = findMax vec
+    f sh el = ifThenElse (x A.> (vec !! y)) 0 el
+      where
+        (y, x) = expToPair $ A.unindex2 sh 
 
-    (n1,n2) = expToSimple $ A.unindex2 (A.shape mat)
-   
-    helper k
-      | k P.== (n1 - 1) = resVec
-      | otherwise = concatOn _2 resVec (helper (k + 1))
-        where
-          resVec = vecToMat1N $ A.take vecEl row ++ zeros
-          vecEl = (A.!!) vec (A.lift k)
-            
-          row = A.slice mat (A.constant (Z :. (k :: Int) :. All))
-          zeros = A.fill (A.constant (Z :. (maxDep - expToSimple vecEl))) 0 :: Acc (Vector Int)
-
-matShape 
-  :: Elt a 
-  => Acc (Matrix a) 
-  -> Exp (Int, Int)
-matShape mat = A.unindex2 (A.shape mat)
-
+-- | Produces the node coordinates for a given depth vector.
+-- >>> CPU.run depthVec
+-- Vector (Z :. 9) [0,1,2,3,4,4,4,2,3]
+--
+-- >>> CPU.run $ nodeCoords depthVec
+-- Matrix (Z :. 9 :. 5) 
+--   [ 1, 0, 0, 0, 0,
+--     1, 1, 0, 0, 0,
+--     1, 1, 1, 0, 0,
+--     1, 1, 1, 1, 0,
+--     1, 1, 1, 1, 1,
+--     1, 1, 1, 1, 2,
+--     1, 1, 1, 1, 3,
+--     1, 1, 2, 0, 0,
+--     1, 1, 2, 2, 0]
 nodeCoords
   :: Acc (Vector Int)
   -> Acc (Matrix Int)
 nodeCoords vec
-  = takeNForNC (A.map (+1) vec) (interestingMat (depthMat vec)) 
+  = takeNFromRows vec (interestingMat (depthMat vec)) 
 
-isPrefixOfMats
-  :: Acc (Matrix Int)
-  -> Acc (Matrix Int)
-  -> Acc (Matrix Int)
-isPrefixOfMats mat1 mat2
-  = A.map boolToInt $ innerProduct mat1 (A.&&) f (A.transpose mat2)
-  where
-    f = \a b -> a A.== b A.|| b A.== 0
-
-
+-- | Selects coordinates of nodes with a given name.
+--
+-- >>> CPU.run nodeVec
+-- Vector (Z :. 9) ['F','E','F','E','V','P','V','A','N']
+--
+-- >>> CPU.run $ nodeCoords depthVec
+-- Matrix (Z :. 9 :. 5) 
+--   [ 1, 0, 0, 0, 0,
+--     1, 1, 0, 0, 0,
+--     1, 1, 1, 0, 0,
+--     1, 1, 1, 1, 0,
+--     1, 1, 1, 1, 1,
+--     1, 1, 1, 1, 2,
+--     1, 1, 1, 1, 3,
+--     1, 1, 2, 0, 0,
+--     1, 1, 2, 2, 0]
+--
+-- >>> CPU.run $ nameCoords (A.lift 'F') nodeVec (nodeCoords depthVec)
+-- Matrix (Z :. 2 :. 5) 
+--   [ 1, 0, 0, 0, 0,
+--     1, 1, 1, 0, 0]
 nameCoords 
   :: (Elt a, Eq a)
   => Exp a 
@@ -101,91 +167,168 @@ nameCoords
 nameCoords el names nc 
   = selectRows (A.map (A.== lift el) names) nc
 
-nameC = nameCoords (lift 'F') nodeVec (nodeCoords depthVec)
+-- | Given two matrices, returns a matrix 
+-- where each entry (i,j) is 1 if i'th row of mat1
+-- is a prefix of j'th row of mat2.
+--
+-- >>> let mat = fromList (Z :. 2 :. 5) [1,0,0,0,0,1,1,1,0,0] :: Matrix Int
+-- >>> mat
+-- Matrix (Z :. 2 :. 5) 
+--   [ 1, 0, 0, 0, 0,
+--     1, 1, 1, 0, 0]
+--
+-- >>> CPU.run mat2
+-- Matrix (Z :. 9 :. 5) 
+--   [ 1, 0, 0, 0, 0,
+--     1, 1, 0, 0, 0,
+--     1, 1, 1, 0, 0,
+--     1, 1, 1, 1, 0,
+--     1, 1, 1, 1, 1,
+--     1, 1, 1, 1, 2,
+--     1, 1, 1, 1, 3,
+--     1, 1, 2, 0, 0,
+--     1, 1, 2, 2, 0]
+--
+-- >>> CPU.run $ isPrefixOfMats mat2 mat1
+-- Matrix (Z :. 9 :. 2) 
+--   [ 1, 0,
+--     1, 0,
+--     1, 1,
+--     1, 1,
+--     1, 1,
+--     1, 1,
+--     1, 1,
+--     1, 0,
+--     1, 0]
+isPrefixOfMats
+  :: Acc (Matrix Int)
+  -> Acc (Matrix Int)
+  -> Acc (Matrix Int)
+isPrefixOfMats mat1 mat2
+  = A.map A.boolToInt 
+  $ innerProduct mat1 (A.&&) f (A.transpose mat2)
+  where
+    f = \a b -> a A.== b A.|| b A.== 0
 
+-- | Drops last non-zero elements in a matrix.
+--
+-- >>> CPU.run mat
+-- Matrix (Z :. 9 :. 5) 
+--   [ 1, 0, 0, 0, 0,
+--     1, 1, 0, 0, 0,
+--     1, 1, 1, 0, 0,
+--     1, 1, 1, 1, 0,
+--     1, 1, 1, 1, 1,
+--     1, 1, 1, 1, 2,
+--     1, 1, 1, 1, 3,
+--     1, 1, 2, 0, 0,
+--     1, 1, 2, 2, 0]
+--
+-- >>> CPU.run $ dropLastNonZero mat
+-- Matrix (Z :. 9 :. 5) 
+--   [ 0, 0, 0, 0, 0,
+--     1, 0, 0, 0, 0,
+--     1, 1, 0, 0, 0,
+--     1, 1, 1, 0, 0,
+--     1, 1, 1, 1, 0,
+--     1, 1, 1, 1, 0,
+--     1, 1, 1, 1, 0,
+--     1, 1, 0, 0, 0,
+--     1, 1, 2, 0, 0]
 dropLastNonZero 
   :: Acc (Matrix Int)
   -> Acc (Matrix Int)
 dropLastNonZero mat
   = A.imap leaveOrZero mat 
   where
-    Z :. _ :. cols = unlift (A.shape mat) :: Z :. Exp Int :. Exp Int
+    (_, cols) = matSh mat
 
     leaveOrZero :: Exp (Z :. Int :. Int) -> Exp Int -> Exp Int
     leaveOrZero shape el 
       = ifThenElse zeroCond 0 el
           where
-          row = shape ^. _2 
-          col = shape ^. _1
+          (row, col) = sh2ToPair shape
           zeroCond = col A.== (cols - 1) A.&& el A./= 0
             A.|| col A./= cols && mat A.! lift (Z :. row :. (col + 1)) A.== 0
 
+-- | Given a matrix with 0 and 1 elements, 
+-- replaces each 1 by the number of its column.
+--
+-- >>> CPU.run mat
+-- Matrix (Z :. 9 :. 3) 
+--   [ 1, 0, 1,
+--     1, 0, 0,
+--     1, 1, 1,
+--     1, 1, 0,
+--     1, 1, 0,
+--     1, 1, 0,
+--     1, 1, 1,
+--     1, 0, 1,
+--     1, 0, 0]
+--
+-- >>> CPU.run $ replaceOnesByCols mat
+-- Matrix (Z :. 9 :. 3) 
+--   [ 0, 0, 2,
+--     0, 0, 0,
+--     0, 1, 2,
+--     0, 1, 0,
+--     0, 1, 0,
+--     0, 1, 0,
+--     0, 1, 2,
+--     0, 0, 2,
+--     0, 0, 0]
 replaceOnesByCols 
   :: Acc (Matrix Int)
   -> Acc (Matrix Int)
 replaceOnesByCols mat = A.zipWith (*) extVec mat
   where 
-    shape = matShape mat
-    rows = fst shape 
-    cols = snd shape
+    (rows, cols) = matSh mat
     
     vec = enumFromN (lift $ Z :. cols) 0 :: Acc (Vector Int)
     extVec = A.replicate (lift $ Z :. rows :. All) vec
 
+-- | Returns the number of the closest ancestor for each node.
+--
+-- >>> CPU.run $ ancestors (nodeCoords depthVec) nodeVec (lift 'F')
+-- Vector (Z :. 9) [0,0,0,1,1,1,1,0,0]
 ancestors 
   :: Acc (Matrix Int)
   -> Acc (Vector Char)
   -> Exp Char
   -> Acc (Vector Int)
-ancestors nc nv ch = maxes rep
+ancestors nc nv ch = A.maximum rep
   where
     dnc = dropLastNonZero nc
     names = nameCoords ch nv nc
     anc = isPrefixOfMats dnc names
     rep = replaceOnesByCols anc
 
-    {-
-concatAll 
-  :: Elt a
-  => Acc (Array DIM3 a)
-  -> Acc (Matrix a)
-concatAll arr = helper 0
-  where
-    n = A.shape arr ^. _3
-
-    helper k 
-      | k == (n - 1) = undefined
--}
-
+-- | Returns a matrix where each row 
+-- is the coordinate of the closest ancestor 
+-- to each corresponding row of the given matrix.
 ancMat
   :: Acc (Vector Int)
   -> Acc (Matrix Int)
   -> Acc (Matrix Int)
 ancMat vec mat = A.reshape (lift (Z :. vecSize :. cols)) ancs
   where
-    shape = matShape mat
-    rows = fst shape 
-    cols = snd shape
+    (rows, cols) = matSh mat
 
     exp = A.expand (const cols) (\p i -> p * cols + i) anc :: Acc (Vector Int)
 
     vecSize = A.length vec
     ancs = gather exp (A.flatten mat)
---    filtered = A.compact expMat repMat
 
+res :: Matrix Int
+res = CPU.run $ ancMat anc nameC
 
+nameC = nameCoords (lift 'F') nodeVec (nodeCoords depthVec)
 
-
-someFunc :: P.IO ()
-someFunc = P.print 2
+anc = ancestors (nodeCoords depthVec) nodeVec (lift 'F')
 
 mat :: Acc (Matrix Int)
 mat = A.use (fromList (Z :. 2 :. 5) [0..])
 
 vec :: Acc (Vector Int)
-vec = A.use $ fromList (Z :. 5) [0..]
-
-anc = ancestors (nodeCoords depthVec) nodeVec (lift 'F')
-
-res = ancMat anc nameC
+vec = A.use $ fromList (Z :. 3) [0..]
 
