@@ -1,5 +1,6 @@
 module Ops where
 
+
 import Data.Array.Accelerate as A
 import Data.Array.Accelerate.LLVM.Native as CPU
 import Data.Array.Accelerate.Control.Lens as Lens
@@ -65,6 +66,22 @@ selectRows vec mat
     filtered = A.afst $ compact sieve mat
     nRows = A.length filtered `A.div` cols 
 
+selectRows'
+  :: (Elt a)
+  => Acc (Vector Int)
+  -> Acc (Matrix a)
+  -> Acc (Matrix a)
+selectRows' vec mat 
+  = A.reshape (lift (Z :. vecSize :. cols)) ancs
+  where
+    (rows, cols) = matSh mat
+
+    exp = A.expand (const cols) (\p i -> p * cols + i) vec :: Acc (Vector Int)
+
+    vecSize = A.length vec
+    ancs = gather exp (A.flatten mat)
+
+
 -- | Calculate the inner product of two matrices. 
 -- Analog to X(f.g)Y APL operator.
 --
@@ -102,6 +119,8 @@ innerProduct mat1 f g mat2
 
     extMat1 = A.replicate (A.lift (Z :. All :. cols2 :. All)) mat1 
     extMat2 = A.replicate (A.lift (Z :. rows1 :. All :. All)) (A.transpose mat2)
+
+-- 2x5 5x9
 
 -- | A monadic two-train tacit function.
 atop 

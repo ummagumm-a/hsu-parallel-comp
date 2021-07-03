@@ -13,11 +13,21 @@ import Ops
 depthVec :: Acc (Vector Int)
 depthVec = A.use $ fromList (Z:.9) [0,1,2,3,4,4,4,2,3]
 
+depthVec' :: Acc (Vector Int)
+depthVec' = A.use $ fromList (Z:.10) [0,1,2,2,2,1,1,2,2,2]
+
 nodeVec :: Acc (Vector Char) 
 nodeVec = A.use $ fromList (Z:.9) "FEFEVPVAN"
 
+nodeVec' :: Acc (Vector Char) 
+nodeVec' = A.use $ fromList (Z:.10) "EEVPVPEVPV"
+
 valuesVec :: Acc (Vector Char)
 valuesVec = A.use $ fromList (Z:.9) "f000w+w07" 
+
+valuesVec' :: Acc (Vector Char)
+valuesVec' = A.use $ fromList (Z:.10) "v0a+b/0c*d"
+
 
 -- | Composes vector of depths, vector of node names
 -- and vector of values at nodes into a single matrix.
@@ -70,6 +80,7 @@ fASTMatrix depths nodes values
 --     0, 0, 0, 0, 1,
 --     0, 0, 1, 0, 0,
 --     0, 0, 0, 1, 0]
+--
 depthMat 
   :: Acc (Vector Int)
   -> Acc (Matrix Int)
@@ -116,6 +127,22 @@ takeNFromRows vec = A.imap f
       where
         (y, x) = expToPair $ A.unindex2 sh 
 
+takeNFromRows'
+  :: Acc (Vector Int)
+  -> Acc (Matrix Int)
+  -> Acc (Matrix Int)
+takeNFromRows' vec mat
+  = izipWith f dMat mat
+  where
+    (rows,cols) = matSh mat
+    
+    dMat = A.reshape (A.lift $ Z :. rows :. cols) 
+         $ extVecAlong cols vec 
+    
+    f sh x y = let (_,col) = sh2ToPair sh 
+                in ifThenElse (col A.> x) 0 y
+
+
 -- | Produces the node coordinates for a given depth vector.
 -- >>> CPU.run depthVec
 -- Vector (Z :. 9) [0,1,2,3,4,4,4,2,3]
@@ -135,7 +162,7 @@ nodeCoords
   :: Acc (Vector Int)
   -> Acc (Matrix Int)
 nodeCoords vec
-  = takeNFromRows vec (interestingMat (depthMat vec)) 
+  = takeNFromRows' vec (interestingMat (depthMat vec)) 
 
 -- | Selects coordinates of nodes with a given name.
 --
@@ -166,6 +193,22 @@ nameCoords
   -> Acc (Matrix Int)
 nameCoords el names nc 
   = selectRows (A.map (A.== lift el) names) nc
+  where
+    f (Z :. i) x = ifThenElse (x A.== lift el) i 0
+
+nameCoords'
+  :: (Elt a, Eq a)
+  => Exp a 
+  -> Acc (Vector a)
+  -> Acc (Matrix Int)
+  -> Acc (Matrix Int)
+nameCoords' el names 
+  = selectRows' (A.afst $ A.filter (A./= (-1)) $ A.imap f names)
+  where
+    f sh x = ifThenElse (x A.== el) i (-1) 
+      where
+        i = A.unindex1 sh :: Exp Int
+
 
 -- | Given two matrices, returns a matrix 
 -- where each entry (i,j) is 1 if i'th row of mat1
@@ -251,6 +294,13 @@ dropLastNonZero mat
           zeroCond = col A.== (cols - 1) A.&& el A./= 0
             A.|| col A./= cols && mat A.! lift (Z :. row :. (col + 1)) A.== 0
 
+dropLastNonZero'
+  :: Acc (Vector Int)
+  -> Acc (Matrix Int)
+  -> Acc (Matrix Int)
+dropLastNonZero' depths 
+  = takeNFromRows' (A.map (\x -> x - 1) depths)
+
 -- | Given a matrix with 0 and 1 elements, 
 -- replaces each 1 by the number of its column.
 --
@@ -292,14 +342,15 @@ replaceOnesByCols mat = A.zipWith (*) extVec mat
 -- >>> CPU.run $ ancestors (nodeCoords depthVec) nodeVec (lift 'F')
 -- Vector (Z :. 9) [0,0,0,1,1,1,1,0,0]
 ancestors 
-  :: Acc (Matrix Int)
+  :: Acc (Vector Int)
   -> Acc (Vector Char)
   -> Exp Char
   -> Acc (Vector Int)
-ancestors nc nv ch = A.maximum rep
+ancestors ds nv ch = A.maximum rep
   where
-    dnc = dropLastNonZero nc
-    names = nameCoords ch nv nc
+    nc = nodeCoords ds
+    dnc = dropLastNonZero' ds nc
+    names = nameCoords' ch nv nc
     anc = isPrefixOfMats dnc names
     rep = replaceOnesByCols anc
 
@@ -314,17 +365,27 @@ ancMat vec mat = A.reshape (lift (Z :. vecSize :. cols)) ancs
   where
     (rows, cols) = matSh mat
 
-    exp = A.expand (const cols) (\p i -> p * cols + i) anc :: Acc (Vector Int)
+    exp = A.expand (const cols) (\p i -> p * cols + i) vec :: Acc (Vector Int)
 
     vecSize = A.length vec
     ancs = gather exp (A.flatten mat)
 
-res :: Matrix Int
-res = CPU.run $ ancMat anc nameC
+ancMat'
+  :: Acc (Vector Int)
+  -> Acc (Matrix Int)
+  -> Acc (Matrix Int)
+ancMat' = selectRows'
 
-nameC = nameCoords (lift 'F') nodeVec (nodeCoords depthVec)
-
-anc = ancestors (nodeCoords depthVec) nodeVec (lift 'F')
+res 
+  :: Char
+  -> Acc (Vector Int)
+  -> Acc (Vector Char)
+  -> Acc (Vector Char)
+  -> Acc (Matrix Int)
+res ch depths types values = ancMat' anc nameC
+  where
+    nameC = nameCoords' (lift ch) types (nodeCoords depths)
+    anc = ancestors depths types (lift ch)
 
 mat :: Acc (Matrix Int)
 mat = A.use (fromList (Z :. 2 :. 5) [0..])
