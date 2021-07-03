@@ -125,7 +125,7 @@ takeNFromRows vec = A.imap f
   where
     f sh el = ifThenElse (x A.> (vec !! y)) 0 el
       where
-        (y, x) = expToPair $ A.unindex2 sh 
+        (I2 y x) = sh
 
 takeNFromRows'
   :: Acc (Vector Int)
@@ -134,12 +134,12 @@ takeNFromRows'
 takeNFromRows' vec mat
   = izipWith f dMat mat
   where
-    (rows,cols) = matSh mat
+    (I2 rows cols) = shape mat
     
     dMat = A.reshape (A.lift $ Z :. rows :. cols) 
          $ extVecAlong cols vec 
     
-    f sh x y = let (_,col) = sh2ToPair sh 
+    f sh x y = let (I2 _ col) = sh 
                 in ifThenElse (col A.> x) 0 y
 
 
@@ -284,13 +284,13 @@ dropLastNonZero
 dropLastNonZero mat
   = A.imap leaveOrZero mat 
   where
-    (_, cols) = matSh mat
+    (I2 _ cols) = shape mat
 
     leaveOrZero :: Exp (Z :. Int :. Int) -> Exp Int -> Exp Int
-    leaveOrZero shape el 
+    leaveOrZero sh el 
       = ifThenElse zeroCond 0 el
           where
-          (row, col) = sh2ToPair shape
+          (I2 row col) = sh
           zeroCond = col A.== (cols - 1) A.&& el A./= 0
             A.|| col A./= cols && mat A.! lift (Z :. row :. (col + 1)) A.== 0
 
@@ -332,7 +332,7 @@ replaceOnesByCols
   -> Acc (Matrix Int)
 replaceOnesByCols mat = A.zipWith (*) extVec mat
   where 
-    (rows, cols) = matSh mat
+    (I2 rows cols) = shape mat
     
     vec = enumFromN (lift $ Z :. cols) 0 :: Acc (Vector Int)
     extVec = A.replicate (lift $ Z :. rows :. All) vec
@@ -363,7 +363,7 @@ ancMat
   -> Acc (Matrix Int)
 ancMat vec mat = A.reshape (lift (Z :. vecSize :. cols)) ancs
   where
-    (rows, cols) = matSh mat
+    (I2 rows cols) = shape mat
 
     exp = A.expand (const cols) (\p i -> p * cols + i) vec :: Acc (Vector Int)
 

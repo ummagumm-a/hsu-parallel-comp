@@ -15,23 +15,6 @@ vecToMat1N vec = A.reshape (A.lift $ Z :. (1 :: Int) :. n) vec
   where
     n = A.size vec
 
--- | Converts Exp of pair to pair of Exp's.
-expToPair :: Elt i => Exp (i, i) -> (Exp i, Exp i)
-expToPair e = (A.fst e, A.snd e)
-
--- | Returns the number of rows and columns of a matrix.
-matSh 
-  :: Elt a 
-  => Acc (Matrix a) 
-  -> (Exp Int, Exp Int)
-matSh = sh2ToPair . A.shape
-
--- | Converts DIM2 shape into a pair of Exp Int's.
-sh2ToPair 
-  :: Exp DIM2
-  -> (Exp Int, Exp Int)
-sh2ToPair = expToPair . A.unindex2
-
 -- | Returns the maximum element in the whole array.
 findMax 
   :: (Shape sh, Elt a, A.Ord a)

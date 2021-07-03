@@ -59,7 +59,7 @@ selectRows
 selectRows vec mat 
   = A.reshape shape' filtered
   where
-    (_,cols) = matSh mat
+    (I2 _ cols) = shape mat
     shape' = A.lift $ Z :. nRows :. cols
 
     sieve = A.replicate (lift (Z :. All :. cols)) vec
@@ -74,7 +74,7 @@ selectRows'
 selectRows' vec mat 
   = A.reshape (lift (Z :. vecSize :. cols)) ancs
   where
-    (rows, cols) = matSh mat
+    (I2 rows cols) = shape mat
 
     exp = A.expand (const cols) (\p i -> p * cols + i) vec :: Acc (Vector Int)
 
@@ -114,8 +114,8 @@ innerProduct mat1 f g mat2
   where
     cond = cols1 A.== rows2
 
-    (rows1, cols1) = matSh mat1
-    (rows2, cols2) = matSh mat2
+    (I2 rows1 cols1) = shape mat1
+    (I2 rows2 cols2) = shape mat2
 
     extMat1 = A.replicate (A.lift (Z :. All :. cols2 :. All)) mat1 
     extMat2 = A.replicate (A.lift (Z :. rows1 :. All :. All)) (A.transpose mat2)
