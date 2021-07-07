@@ -1,0 +1,5 @@
+let keys = res 'F' depthVec nodeVec valuesVec
+let nc = nodeCoords depthVec
+let g = groupByKeys keys nc
+let ko = keyOp g (\v m -> the $ A.sum $ A.flatten m :: Exp Int)
+

@@ -15,6 +15,9 @@ vecToMat1N vec = A.reshape (A.lift $ Z :. (1 :: Int) :. n) vec
   where
     n = A.size vec
 
+scalToVec :: Elt a => Acc (Scalar a) -> Acc (Vector a)
+scalToVec = A.reshape (A.lift $ Z :. (1 :: Int))
+
 -- | Returns the maximum element in the whole array.
 findMax 
   :: (Shape sh, Elt a, A.Ord a)

@@ -7,6 +7,130 @@ import Data.Array.Accelerate.Control.Lens as Lens
 import Data.List
 import Utils
 
+-- Operations:
+-- Vector -> Matrix -> Scalar
+-- Vector -> Matrix -> Vector
+-- Vector -> Matrix -> Matrix
+
+-- mat = [  0,  1,  2,  3,
+--          4,  5,  6,  7,
+--          8,  9, 10, 11,
+--          12, 13, 14, 15,
+--          16, 17, 18, 19,
+--          20, 21, 22, 23,
+--          24, 25, 26, 27,
+--          28, 29, 30, 31,
+--          32, 33, 34, 35]
+--
+-- keys = [[0, 1]]
+--
+-- segs = [4]
+--
+-- f = \_ m -> A.size m
+--
+-- keyOp [  0,  1,  2,  3,  [[0,1]] [4] (\_ m -> A.size m)
+--          4,  5,  6,  7,
+--          8,  9, 10, 11,
+--          12, 13, 14, 15,
+--          16, 17, 18, 19,
+--          20, 21, 22, 23,
+--          24, 25, 26, 27,
+--          28, 29, 30, 31,
+--          32, 33, 34, 35]
+--
+-- segsMod = A.zip (A.scanl (+) 0 [4]) [4]
+-- segsMod = A.zip [0,4] [4]
+-- segsMod = [(0,4)]
+--
+-- ans [0,1] [(0,4)]
+-- ans = scalToVec (A.unit res)
+-- ans = scalToVec (A.unit (f [0,1] subMv)
+-- ans = scalToVec (A.unit (f [0,1] (selectRows' inds mv))
+-- ans = scalToVec (A.unit (f [0,1] (selectRows' (enumFromN (A.lift $ Z :. length) offset) mv))
+-- ans = scalToVec (A.unit (f [0,1] (selectRows' (enumFromN (A.lift $ Z :. 4) 0) mv))
+-- ans = scalToVec (A.unit (f [0,1] (selectRows' [0,1,2,3] mv))
+-- ans = scalToVec (A.unit (f [0,1] ([ 0, 1, 2, 3,
+--                                     4, 5, 6, 7,
+--                                     8, 9, 10, 11,
+--                                     12, 13, 14, 15 ])
+-- ans = [16] :: Vector (Z :. 1)
+
+f 
+  :: (Elt e, Elt v)
+  => Acc (Vector e)
+  -> Acc (Matrix v)
+  -> Exp Int
+f _ = A.size 
+
+keyOp 
+  :: (Elt k, Elt v, Elt r, Eq k)
+  => Acc (Matrix k, Matrix v, Segments Int)
+  -> (Acc (Vector k) -> Acc (Matrix v) -> Exp r)
+  -> Acc (Vector r)
+keyOp (T3 mk mv segs) f 
+  = helper (tMk mk) (A.tail segsMod) (ans mk segsMod)
+  where
+    segsMod = A.zip (A.scanl (+) 0 segs) segs
+
+    tMk = A.transpose . A.tail . A.transpose
+
+    ans mk' segs' = scalToVec (A.unit res)
+      where
+        res = f (slice0 mk') subMv
+        
+        (T2 offset length) = segs' A.!! 0
+        inds = enumFromN (A.lift $ Z :. length) offset
+        subMv = selectRows' inds mv
+
+        slice0 mat = flatten $ slice mat (constant (Z :. (0 :: Int) :. All))
+ 
+
+    helper mk' segs' acc
+      = ifThenElse (the (A.compute $ A.unit cond)) acc 
+          (helper (tMk mk') (A.tail segs') (acc A.++ vecRes))
+      where
+        cond = A.null segs'
+
+        vecRes = ans mk' segs'
+
+ans f mk' mv segs' = scalToVec (A.unit res)
+      where
+        res = f (slice0 mk') subMv
+        
+        (T2 offset length) = segs' A.!! 0
+        inds = enumFromN (A.lift $ Z :. length) offset
+        subMv = selectRows' inds mv
+
+        slice0 mat = flatten $ slice mat (constant (Z :. (0 :: Int) :. All))
+ 
+
+        
+groupByKeys :: (Elt k, Elt v, Eq k)
+    => Acc (Matrix k)
+    -> Acc (Matrix v)
+    -> Acc (Matrix k, Matrix v, Segments Int)
+groupByKeys keys vals 
+  = T3 (selectRows' uniqueRowsIdxVec keys) 
+       (selectRows' selectors' vals) 
+        descriptor
+    where
+        (I2 nKeysRows nKeysCols) = shape keys
+
+        -- each row contains indexes of equal rows
+        -- groupsMatrix: nKeysRows x nKeysRows
+        groupsMatrix = A.imap (\(I2 _ j) v -> boolToInt v * (j + 1) - 1)
+            $ innerProduct' (==) (&&) keys keys
+
+        -- if a or b is zero, min a b is zero, and if not, (a == 0 || b == 0) is zero
+        chooseMinId :: Exp Int -> Exp Int -> Exp Int
+        chooseMinId a b = if a < 0 || b < 0 then max a b else min a b
+        uniqueRowsIdxVec = A.afst
+                         $ A.filter (>= 0)
+                         $ A.imap (\(I1 i) n -> boolToInt (i == n) * (n + 1) - 1)
+                         $ fold1 chooseMinId groupsMatrix
+
+        (T2 selectors' descriptor) = A.filter (> 0) $ selectRows' uniqueRowsIdxVec groupsMatrix 
+
 -- | Produces an outer vector product of two vectors
 -- with some function. 
 --
@@ -119,6 +243,24 @@ innerProduct mat1 f g mat2
 
     extMat1 = A.replicate (A.lift (Z :. All :. cols2 :. All)) mat1 
     extMat2 = A.replicate (A.lift (Z :. rows1 :. All :. All)) (A.transpose mat2)
+
+-- Inner product of 2 matrices (general case of matrix multiplication with custom product and sum combinators)
+innerProduct' 
+    :: (Elt a, Elt b, Elt c)
+    => (Exp a -> Exp b -> Exp c)  -- product function: how to combine 2 elements from two matrices
+    -> (Exp c -> Exp c -> Exp c)  -- sum function: how to combine the row of results into single element
+    -> Acc (Matrix a)             -- ma x x
+    -> Acc (Matrix b)             -- x x nb 
+    -> Acc (Matrix c)
+innerProduct' prodF sumF a b 
+  = fold1 sumF $ A.zipWith prodF aExt bExt
+    where
+        -- r1 == c2 - precondition
+        (I2 r1 _) = shape a
+        (I2 r2 _) = shape b
+
+        aExt = A.replicate (lift (Z :. All :. r2 :. All)) a
+        bExt = A.replicate (lift (Z :. r1 :. All :. All)) b
 
 -- 2x5 5x9
 

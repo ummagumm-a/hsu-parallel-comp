@@ -205,9 +205,14 @@ nameCoords'
 nameCoords' el names 
   = selectRows' (A.afst $ A.filter (A./= (-1)) $ A.imap f names)
   where
-    f sh x = ifThenElse (x A.== el) i (-1) 
+--    f sh x = ifThenElse (x A.== el) i (-1) 
+--      where
+--        i = A.unindex1 sh :: Exp Int
+
+    f sh x = boolToInt (x A.== el) * (i + 1) - 1 
       where
         i = A.unindex1 sh :: Exp Int
+
 
 
 -- | Given two matrices, returns a matrix 
@@ -393,3 +398,4 @@ mat = A.use (fromList (Z :. 2 :. 5) [0..])
 vec :: Acc (Vector Int)
 vec = A.use $ fromList (Z :. 3) [0..]
 
+keys = res 'F' depthVec nodeVec valuesVec
