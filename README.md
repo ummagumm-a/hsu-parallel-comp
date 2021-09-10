@@ -1,5 +1,7 @@
 # parallelCompilers
 
+Algorithm is implemented based on this article: https://dl.acm.org/doi/pdf/10.1145/2935323.2935331
+
 the three vectors describing AST:
 
 depthVec :: Acc (Vector Int)    
